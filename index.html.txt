@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Global Bar Ref</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { -webkit-tap-highlight-color: transparent; }
+        .fab {
+            position: fixed; bottom: 30px; right: 30px;
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.5);
+            transition: transform 0.2s;
+        }
+        .fab:active { transform: scale(0.90); }
+        .sub-text { font-style: italic; color: #ef4444; font-size: 0.85em; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen pb-32">
+
+    <div class="bg-slate-900 text-white p-5 sticky top-0 z-50 shadow-lg flex justify-between items-center">
+        <div>
+            <h1 class="text-xl font-bold tracking-wider">🍸 Bar Ref</h1>
+            <p class="text-xs text-gray-400">Live Global Database</p>
+        </div>
+        <div id="status" class="text-xs px-2 py-1 rounded bg-yellow-600 animate-pulse">Connecting...</div>
+    </div>
+
+    <div class="p-4 bg-white sticky top-20 z-40 shadow-sm">
+        <input type="text" id="searchInput" 
+               placeholder="Search by name or ingredient..." 
+               class="w-full p-4 rounded-xl bg-gray-100 border-none focus:ring-2 focus:ring-indigo-500 outline-none text-lg"
+               onkeyup="filterList()">
+    </div>
+
+    <div id="drinkList" class="p-4 space-y-4">
+        <div class="text-center text-gray-500 mt-10">Loading drinks...</div>
+    </div>
+
+    <div id="addModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <h2 class="text-2xl font-bold mb-4 text-gray-800">New Drink</h2>
+            
+            <input type="text" id="newName" placeholder="Name (e.g. B-52)" class="w-full mb-3 p-3 border rounded-lg bg-gray-50">
+            
+            <select id="newType" class="w-full mb-3 p-3 border rounded-lg bg-gray-50">
+                <option value="Shot">Shot</option>
+                <option value="Mixed Drink">Mixed Drink</option>
+                <option value="Cocktail">Cocktail</option>
+                <option value="Beer/Wine">Beer/Wine</option>
+            </select>
+            
+            <textarea id="newIng" placeholder="Ingredients (e.g. Kahlua, Baileys)" class="w-full mb-4 p-3 border rounded-lg bg-gray-50 h-24"></textarea>
+            
+            <div class="flex gap-3">
+                <button onclick="toggleModal()" class="flex-1 py-3 rounded-xl bg-gray-200 font-bold text-gray-700">Cancel</button>
+                <button onclick="saveDrink()" class="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-bold shadow-lg">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <button onclick="toggleModal()" class="fab bg-indigo-600 text-white rounded-full w-16 h-16 flex items-center justify-center text-4xl font-light z-50">
+        +
+    </button>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+
+        // --- 1. CONFIGURATION (PASTE YOUR KEYS HERE) ---
+        const firebaseConfig = {  apiKey: "AIzaSyBsv0OItFACtEXdCjSMwVR650DtvLGGhuw",
+  authDomain: "bar-ref-app.firebaseapp.com",
+  projectId: "bar-ref-app",
+  storageBucket: "bar-ref-app.firebasestorage.app",
+  messagingSenderId: "311228761053",
+  appId: "1:311228761053:web:f466d51362751c2c6eec34"
+                  };
+
+        // --- 2. SUBSTITUTION DATABASE ---
+        const subsDB = {
+            "Triple Sec": "Cointreau, Grand Marnier, or Curacao",
+            "Simple Syrup": "Agave, Honey, or Maple Syrup",
+            "Lime Juice": "Lemon Juice (changes flavor)",
+            "Sour Mix": "Lime Juice + Simple Syrup",
+            "Cream": "Half & Half or Milk",
+            "Baileys": "Any Irish Cream"
+        };
+
+        // --- 3. INIT FIREBASE ---
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const colRef = collection(db, "drinks");
+        let allDrinks = [];
+
+        // --- 4. REAL-TIME LISTENER ---
+        const q = query(colRef, orderBy("createdAt", "desc"));
+        
+        onSnapshot(q, (snapshot) => {
+            allDrinks = [];
+            snapshot.docs.forEach(doc => {
+                allDrinks.push({ ...doc.data(), id: doc.id });
+            });
+            
+            // Update Status Light
+            const status = document.getElementById('status');
+            status.innerText = "Live";
+            status.className = "text-xs px-2 py-1 rounded bg-green-500 text-white shadow";
+            
+            filterList();
+        }, (error) => {
+            console.error(error);
+            document.getElementById('status').innerText = "Error";
+            document.getElementById('status').className = "text-xs px-2 py-1 rounded bg-red-500 text-white";
+        });
+
+        // --- 5. SEARCH & RENDER LOGIC ---
+        window.filterList = function() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const list = document.getElementById('drinkList');
+            list.innerHTML = "";
+
+            const filtered = allDrinks.filter(d => 
+                d.name.toLowerCase().includes(search) || 
+                d.ingredients.toLowerCase().includes(search)
+            );
+
+            if (filtered.length === 0) {
+                list.innerHTML = `<div class="text-center text-gray-400 mt-10">No drinks found. Click + to add one!</div>`;
+                return;
+            }
+
+            filtered.forEach(drink => {
+                // Apply substitutions logic
+                let formattedIngredients = drink.ingredients;
+                
+                // Check each known sub to see if it exists in this drink
+                for (const [key, val] of Object.entries(subsDB)) {
+                    if (formattedIngredients.includes(key)) {
+                        // Highlight the ingredient and add the tip
+                        formattedIngredients = formattedIngredients.replace(
+                            key, 
+                            `<b>${key}</b> <span class="sub-text">(Sub: ${val})</span>`
+                        );
+                    }
+                }
+
+                const item = `
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="text-lg font-bold text-gray-800">${drink.name}</h3>
+                            <span class="text-xs font-bold px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full uppercase">${drink.type}</span>
+                        </div>
+                        <p class="text-gray-600 text-sm leading-relaxed">${formattedIngredients}</p>
+                    </div>
+                `;
+                list.innerHTML += item;
+            });
+        }
+
+        // --- 6. ADD DRINK LOGIC ---
+        window.saveDrink = async function() {
+            const name = document.getElementById('newName').value;
+            const type = document.getElementById('newType').value;
+            const ingredients = document.getElementById('newIng').value;
+
+            if(!name || !ingredients) return alert("Please fill in all fields");
+
+            const saveBtn = document.querySelector('#addModal button:last-child');
+            saveBtn.innerText = "Saving...";
+            
+            try {
+                await addDoc(colRef, {
+                    name: name,
+                    type: type,
+                    ingredients: ingredients, // Store as simple string
+                    createdAt: serverTimestamp()
+                });
+                
+                // Cleanup
+                document.getElementById('newName').value = "";
+                document.getElementById('newIng').value = "";
+                saveBtn.innerText = "Save";
+                toggleModal();
+                
+            } catch (err) {
+                console.error(err);
+                alert("Error saving: " + err.message);
+                saveBtn.innerText = "Save";
+            }
+        }
+
+        window.toggleModal = function() {
+            document.getElementById('addModal').classList.toggle('hidden');
+        }
+    </script>
+</body>
+</html>
